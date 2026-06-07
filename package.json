@@ -4,6 +4,7 @@
   "description": "GitHub Copilot-like AI chat powered by local Ollama LLM — fully offline",
   "version": "0.1.0",
   "publisher": "local-dev",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
