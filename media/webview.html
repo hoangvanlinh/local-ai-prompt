@@ -1,0 +1,2065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{{NONCE}}';" />
+  <title>Local AI Prompt</title>
+  <style>
+    /* ── Reset & root ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        var(--vscode-sideBar-background,       #1e1e1e);
+      --bg2:       var(--vscode-input-background,         #2d2d30);
+      --bg3:       var(--vscode-editor-background,        #1e1e1e);
+      --fg:        var(--vscode-foreground,               #cccccc);
+      --fg2:       var(--vscode-descriptionForeground,    #9d9d9d);
+      --border:    var(--vscode-panel-border,             #3c3c3c);
+      --accent:    var(--vscode-button-background,        #0e639c);
+      --accent-fg: var(--vscode-button-foreground,        #ffffff);
+      --accent-hv: var(--vscode-button-hoverBackground,   #1177bb);
+      --code-bg:   #0d0d0d;
+      --user-bg:   #1a3a5c;
+      --user-fg:   #cce5ff;
+      --ai-bg:     var(--vscode-editorWidget-background,  #252526);
+      --ok:        #4ec9b0;
+      --err:       #f14c4c;
+      --warn:      #cca700;
+    }
+
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      font-size: var(--vscode-font-size, 13px);
+      background: var(--bg);
+      color: var(--fg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;  /* needed for drop overlay */
+    }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 6px;
+    }
+
+    #header-left { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+    #conn-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--warn); flex-shrink: 0;
+      transition: background .3s;
+    }
+    #conn-dot.ok   { background: var(--ok); }
+    #conn-dot.fail { background: var(--err); }
+
+    #header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+    /* ── Model dropdown ────────────────────────────────────────── */
+    #model-wrapper { position: relative; flex-shrink: 0; }
+    #model-btn {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      color: var(--fg2);
+      font-size: 10px; font-family: inherit;
+      padding: 2px 8px; border-radius: 4px;
+      cursor: pointer; max-width: 145px;
+      transition: border-color .15s, color .15s;
+    }
+    #model-btn:hover { border-color: var(--accent); color: var(--fg); }
+    #model-btn svg   { width: 9px; height: 9px; flex-shrink: 0; opacity: .6; }
+    #model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #model-menu {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      min-width: 220px;
+      background: var(--vscode-editorWidget-background, #252526);
+      border: 1px solid var(--border); border-radius: 6px;
+      z-index: 200; box-shadow: 0 4px 18px rgba(0,0,0,.55);
+      overflow: hidden;
+    }
+    #model-menu.hidden { display: none; }
+    .mdl-section { border-bottom: 1px solid var(--border); }
+    .mdl-section:last-child { border-bottom: none; }
+    .mdl-lbl { font-size: 10px; color: var(--fg2); padding: 5px 10px 2px; text-transform: uppercase; letter-spacing: .3px; }
+    .mdl-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; font-size: 11px; cursor: pointer;
+      color: var(--fg); transition: background .1s;
+    }
+    .mdl-item:hover            { background: rgba(255,255,255,.06); }
+    .mdl-item.active           { color: var(--accent); font-weight: 600; }
+    .mdl-item.not-installed    { color: var(--fg2); }
+    .mdl-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .mdl-dot.ok { background: var(--ok); }
+    .mdl-dot.na { background: var(--border); }
+    .mdl-pull {
+      margin-left: auto; font-size: 9px; color: var(--fg2);
+      background: var(--bg2); border: 1px solid var(--border);
+      padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+    }
+    .mdl-item.pulling { pointer-events: none; opacity: .85; flex-wrap: wrap; }
+    .mdl-progress-wrap {
+      width: 100%; height: 3px; background: var(--border);
+      border-radius: 2px; overflow: hidden; flex-shrink: 0;
+    }
+    .mdl-progress-bar {
+      height: 100%; width: 0%; background: var(--accent);
+      transition: width .2s ease; border-radius: 2px;
+    }
+
+    #header-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--fg);
+      white-space: nowrap;
+    }
+
+    #clear-btn {
+      background: none;
+      border: none;
+      color: var(--fg2);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background .15s, color .15s;
+    }
+    #clear-btn:hover { background: var(--bg2); color: var(--fg); }
+
+    /* ── Connection banner ─────────────────────────────────────── */
+    #conn-banner {
+      display: none;
+      background: #2e2500;
+      border-bottom: 1px solid var(--warn);
+      color: var(--warn);
+      font-size: 11px;
+      padding: 5px 12px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    #conn-banner.show { display: block; }
+
+    /* ── Messages ──────────────────────────────────────────────── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+    }
+    #messages::-webkit-scrollbar { width: 5px; }
+    #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Welcome state */
+    #welcome {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      text-align: center;
+      color: var(--fg2);
+      padding: 24px 16px;
+      gap: 10px;
+    }
+    #welcome svg { width: 44px; height: 44px; opacity: .45; }
+    #welcome h3 { font-size: 14px; color: var(--fg); font-weight: 600; }
+    #welcome p  { font-size: 12px; line-height: 1.6; }
+
+    /* Suggestion chips */
+    #suggestions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 4px; }
+    .chip {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--fg2);
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--fg); }
+
+    /* ── Message bubbles ───────────────────────────────────────── */
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 94%;
+      animation: fadeUp .18s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+
+    .msg.user      { align-self: flex-end; align-items: flex-end; }
+    .msg.assistant { align-self: flex-start; align-items: flex-start; }
+
+    .msg-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--fg2);
+      margin-bottom: 3px;
+      padding: 0 4px;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+    }
+
+    .bubble {
+      padding: 9px 12px;
+      border-radius: 12px;
+      line-height: 1.55;
+      word-break: break-word;
+      max-width: 100%;
+    }
+    .user .bubble {
+      background: var(--user-bg);
+      color: var(--user-fg);
+      border-bottom-right-radius: 3px;
+      white-space: pre-wrap;
+    }
+    .assistant .bubble {
+      background: var(--ai-bg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 3px;
+    }
+
+    /* ── Markdown inside bubbles ───────────────────────────────── */
+    .bubble p        { margin-bottom: 7px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble h1       { font-size: 15px; margin: 10px 0 5px; color: var(--fg); }
+    .bubble h2       { font-size: 14px; margin: 9px 0 4px;  color: var(--fg); }
+    .bubble h3       { font-size: 13px; margin: 8px 0 3px;  color: var(--fg); }
+    .bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 7px; }
+    .bubble li       { margin-bottom: 3px; }
+    .bubble hr       { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .bubble a        { color: #4fc1ff; }
+    .bubble strong   { color: #e0e0e0; }
+    .bubble em       { color: #ce9178; font-style: italic; }
+
+    .bubble code {
+      background: rgba(0,0,0,.45);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+      font-size: 92%;
+      color: #9cdcfe;
+    }
+
+    /* ── Code blocks ───────────────────────────────────────────── */
+    .code-block {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin: 7px 0;
+      overflow: hidden;
+    }
+    .code-block-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 10px;
+      background: rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--border);
+    }
+    .code-lang { font-size: 10px; color: var(--fg2); }
+    .copy-btn {
+      background: none;
+      border: none;
+      color: var(--fg2);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      transition: background .15s, color .15s;
+    }
+    .copy-btn:hover  { background: var(--bg2); color: var(--fg); }
+    .copy-btn.copied { color: var(--ok); }
+
+    .code-block pre {
+      margin: 0;
+      padding: 10px 12px;
+      overflow-x: auto;
+      font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #d4d4d4;
+      tab-size: 2;
+    }
+    .code-block pre::-webkit-scrollbar { height: 4px; }
+    .code-block pre::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── Typing indicator ──────────────────────────────────────── */
+    #typing {
+      display: none;
+      align-self: flex-start;
+      background: var(--ai-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      border-bottom-left-radius: 3px;
+      padding: 10px 14px;
+      gap: 5px;
+      align-items: center;
+    }
+    #typing.show { display: flex; }
+
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--fg2);
+      animation: bounce 1.3s infinite ease-in-out;
+    }
+    .dot:nth-child(2) { animation-delay: .18s; }
+    .dot:nth-child(3) { animation-delay: .36s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0);   opacity: .5; }
+      30%            { transform: translateY(-5px); opacity: 1;  }
+    }
+
+    /* ── Input area ────────────────────────────────────────────── */
+    #input-area {
+      border-top: 1px solid var(--border);
+      padding: 8px;
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+    #input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 8px;
+      transition: border-color .15s, background .15s;
+      position: relative;
+    }
+    #input-row:focus-within { border-color: var(--accent); }
+    #input-row.drag-over {
+      border-color: var(--accent) !important;
+      background: rgba(14,99,156,.14);
+    }
+    #input-row.drag-over::after {
+      content: 'Drop to add as context';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(14,99,156,.18);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: none;
+      border-radius: 7px;
+    }
+
+    #msg-input {
+      flex: 1;
+      background: none;
+      border: none;
+      outline: none;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: inherit;
+      resize: none;
+      min-height: 20px;
+      max-height: 33vh;
+      line-height: 1.45;
+    }
+    #msg-input::placeholder { color: var(--fg2); }
+
+    #send-btn {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: none;
+      border-radius: 5px;
+      padding: 5px 9px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background .15s, transform .1s;
+    }
+    #send-btn:hover    { background: var(--accent-hv); }
+    #send-btn:active   { transform: scale(.93); }
+    #send-btn:disabled { background: var(--bg2); color: var(--fg2); cursor: not-allowed; }
+    #send-btn svg { width: 14px; height: 14px; }
+
+    /* ── Error toast ───────────────────────────────────────────── */
+    #error-toast {
+      display: none;
+      position: absolute;
+      bottom: 76px;
+      left: 8px; right: 8px;
+      background: #4a1515;
+      border: 1px solid var(--err);
+      color: var(--err);
+      font-size: 11px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      z-index: 50;
+      animation: slideUp .25s ease;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+
+    /* ── Action bar ───────────────────────────────────────────────── */
+    #action-bar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 8px 4px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .act-label {
+      font-size: 10px;
+      color: var(--fg2);
+      white-space: nowrap;
+      margin-right: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── Action select ──────────────────────────────────────────── */
+    #action-select {
+      flex: 1;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font-size: 11px; font-family: inherit;
+      padding: 3px 7px; border-radius: 6px;
+      cursor: pointer; outline: none;
+      transition: border-color .15s;
+    }
+    #action-select:hover, #action-select:focus { border-color: var(--accent); }
+    #action-select option { background: var(--vscode-editorWidget-background, #252526); }
+
+    /* ── Context (file attach) bar ───────────────────────────── */
+    #context-bar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 5px;
+      padding: 0 0 6px;
+    }
+    #context-bar.show { display: flex; }
+
+    .ctx-chip {
+      display: flex; align-items: center; gap: 5px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px 4px 6px;
+      font-size: 11px;
+      color: var(--fg);
+      max-width: 220px;
+      min-width: 0;
+      cursor: default;
+      transition: border-color .15s;
+    }
+    .ctx-chip:hover { border-color: var(--accent); }
+    .ctx-chip-icon { flex-shrink: 0; display: flex; align-items: center; }
+    .ctx-chip-icon svg { width: 13px; height: 13px; }
+    .ctx-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 500; }
+    .ctx-chip-meta { color: var(--fg2); flex-shrink: 0; font-size: 10px; }
+    .ctx-chip-rm {
+      background: none; border: none; color: var(--fg2);
+      cursor: pointer; font-size: 15px; padding: 0 0 0 2px; line-height: 1;
+      flex-shrink: 0; transition: color .1s;
+    }
+    .ctx-chip-rm:hover { color: var(--err); }
+
+    #attach-btn {
+      background: none; border: none; color: var(--fg2);
+      cursor: pointer; padding: 4px 6px; border-radius: 5px;
+      display: flex; align-items: center; flex-shrink: 0;
+      transition: background .15s, color .15s;
+    }
+    #attach-btn:hover { background: var(--bg2); color: var(--fg); }
+    #attach-btn:disabled { opacity: .35; cursor: not-allowed; }
+    #attach-btn svg { width: 14px; height: 14px; }
+
+    /* ── Drag-drop overlay ─────────────────────────────────────── */
+    #drop-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(14, 99, 156, 0.12);
+      border: 2px dashed var(--accent);
+      border-radius: 6px;
+      z-index: 300;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+    #drop-overlay.show { display: flex; }
+    #drop-overlay svg  { width: 36px; height: 36px; opacity: .8; }
+
+    /* Auto / folder chip variants */
+    .ctx-chip.auto  { border-color: rgba(78,201,176,.5); }
+    .ctx-chip.folder { border-color: rgba(220,170,0,.45); }
+
+    /* ── Apply / Create buttons on AI response ─────────────────── */
+    .apply-bar {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .apply-btn {
+      background: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 10px;
+      font-family: inherit;
+      padding: 3px 9px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .apply-btn:hover  { background: var(--accent); color: var(--accent-fg); }
+    .apply-btn:disabled { opacity: .5; cursor: default; }
+
+    /* ── Agent panel ─────────────────────────────────────────────── */
+    #agent-panel {
+      display: none;
+      flex-direction: column;
+      gap: 0;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 6px 8px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #agent-panel.show { display: flex; }
+    #agent-panel-hdr {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 10px;
+      background: rgba(255,255,255,.03);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px; font-weight: 600; color: var(--fg);
+    }
+    #agent-spinner {
+      width: 12px; height: 12px; border-radius: 50%;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      animation: spin .7s linear infinite;
+      flex-shrink: 0; display: none;
+    }
+    #agent-spinner.show { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #agent-tasks { padding: 4px 0; }
+    .agent-task {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 5px 10px; font-size: 11px; color: var(--fg2);
+      border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .agent-task:last-child { border-bottom: none; }
+    .agent-task-icon { flex-shrink: 0; margin-top: 1px; font-size: 12px; width: 14px; text-align: center; }
+    .agent-task-info { min-width: 0; }
+    .agent-task-file { font-family: var(--vscode-editor-font-family, monospace); color: var(--fg); font-size: 10px; }
+    .agent-task-desc { font-size: 10px; color: var(--fg2); margin-top: 1px; }
+    .agent-task-reason {
+      font-size: 10px; color: var(--warn); margin-top: 3px;
+      padding: 3px 6px; background: rgba(204,167,0,.08);
+      border-left: 2px solid var(--warn); border-radius: 0 3px 3px 0;
+    }
+    .agent-task.running { background: rgba(14,99,156,.12); }
+    .agent-task.running .agent-task-file { color: var(--accent); }
+    .agent-task.done .agent-task-file { color: var(--ok); }
+    .agent-task.error .agent-task-file { color: var(--err); }
+
+    /* ── History sidebar ─────────────────────────────────────────── */
+    #history-sidebar {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 400;
+      background: var(--bg);
+      flex-direction: column;
+      animation: slideInLeft .15s ease;
+    }
+    @keyframes slideInLeft {
+      from { transform: translateX(-100%); opacity: 0; }
+      to   { transform: translateX(0);     opacity: 1; }
+    }
+    #history-sidebar.show { display: flex; }
+
+    #history-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #history-hdr-title { font-size: 12px; font-weight: 600; color: var(--fg); }
+    #history-close-btn {
+      background: none; border: none; color: var(--fg2);
+      cursor: pointer; font-size: 16px; padding: 2px 6px;
+      border-radius: 4px; line-height: 1;
+      transition: background .15s, color .15s;
+    }
+    #history-close-btn:hover { background: var(--bg2); color: var(--fg); }
+
+    #history-new-btn {
+      margin: 8px 10px;
+      background: var(--accent); color: var(--accent-fg);
+      border: none; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; font-family: inherit;
+      cursor: pointer; text-align: left;
+      transition: background .15s;
+      flex-shrink: 0;
+    }
+    #history-new-btn:hover { background: var(--accent-hv); }
+
+    #history-list {
+      flex: 1; overflow-y: auto;
+      padding: 0 6px 8px;
+    }
+    #history-list::-webkit-scrollbar { width: 4px; }
+    #history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .hist-item {
+      display: flex; align-items: center; gap: 0;
+      border-radius: 6px;
+      margin-bottom: 2px;
+      transition: background .1s;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .hist-item:hover { background: rgba(255,255,255,.05); }
+    .hist-item.active { background: rgba(14,99,156,.2); }
+
+    .hist-item-body {
+      flex: 1; min-width: 0;
+      padding: 7px 8px;
+    }
+    .hist-item-title {
+      font-size: 12px; color: var(--fg);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .hist-item.active .hist-item-title { color: var(--accent); font-weight: 600; }
+    .hist-item-date { font-size: 10px; color: var(--fg2); margin-top: 2px; }
+
+    .hist-item-del {
+      background: none; border: none; color: var(--fg2);
+      cursor: pointer; padding: 6px 8px; font-size: 14px; line-height: 1;
+      opacity: 0; transition: opacity .15s, color .15s;
+      flex-shrink: 0;
+    }
+    .hist-item:hover .hist-item-del { opacity: 1; }
+    .hist-item-del:hover { color: var(--err); }
+
+    /* ── Header history button ──────────────────────────────────── */
+    #history-btn {
+      background: none; border: none; color: var(--fg2);
+      cursor: pointer; padding: 3px 6px; border-radius: 4px;
+      display: flex; align-items: center; flex-shrink: 0;
+      transition: background .15s, color .15s;
+    }
+    #history-btn:hover { background: var(--bg2); color: var(--fg); }
+    #history-btn svg { width: 14px; height: 14px; }
+  </style>
+</head>
+<body>
+
+<!-- ── History sidebar ────────────────────────────────────────────── -->
+<div id="history-sidebar">
+  <div id="history-hdr">
+    <span id="history-hdr-title">Chat History</span>
+    <button id="history-close-btn" title="Close">✕</button>
+  </div>
+  <button id="history-new-btn">+ New Chat</button>
+  <div id="history-list"></div>
+</div>
+
+<div id="drop-overlay">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+  </svg>
+  Drop files from Finder to add as context
+  <span style="font-size:10px;opacity:.7;font-weight:400">(drag from VS Code Explorer → use 📎 button)</span>
+</div>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div id="header">
+  <div id="header-left">
+    <div id="conn-dot" title="Ollama connection status"></div>
+    <span id="header-title">Local AI Prompt</span>
+  </div>
+  <div id="header-right">
+    <!-- Model dropdown -->
+    <div id="model-wrapper">
+      <button id="model-btn" title="Select Ollama model">
+        <span id="model-name">gemma:2b</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div id="model-menu" class="hidden">
+        <div class="mdl-section" id="mdl-installed">
+          <div class="mdl-lbl">✓ Installed</div>
+        </div>
+        <div class="mdl-section" id="mdl-available">
+          <div class="mdl-lbl">Popular (not installed)</div>
+        </div>
+      </div>
+    </div>
+    <button id="history-btn" title="Chat history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>
+      </svg>
+    </button>
+    <button id="clear-btn" title="Clear current chat">⌫</button>
+  </div>
+</div>
+
+<div id="conn-banner">
+  ⚠ Ollama not running — start with: <strong>ollama serve</strong>
+</div>
+
+<!-- ── Messages ────────────────────────────────────────────────── -->
+<div id="messages">
+  <!-- Welcome screen -->
+  <div id="welcome">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+      <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
+    </svg>
+    <h3>Local AI Prompt</h3>
+    <p>Ask me anything about your code.<br>
+       Select code and right-click for quick actions.</p>
+    <div id="suggestions">
+      <span class="chip" data-prompt="Explain how async/await works in JavaScript">Explain async/await</span>
+      <span class="chip" data-prompt="Write a Python function to parse JSON safely">Parse JSON safely</span>
+      <span class="chip" data-prompt="What are the SOLID principles in software design?">SOLID principles</span>
+      <span class="chip" data-prompt="Show me a REST API example with Express.js">REST API example</span>
+    </div>
+  </div>
+
+  <!-- Typing indicator (stays at bottom of list) -->
+  <div id="typing">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+</div>
+
+<div id="error-toast"></div>
+
+<!-- ── Action bar ─────────────────────────────────────────────────── -->
+<div id="action-bar">
+  <span class="act-label">Action:</span>
+  <select id="action-select">
+    <option value="chat">💬  Ask</option>
+    <option value="plan">📝  Plan</option>
+    <option value="agent">🤖  Agent</option>
+  </select>
+</div>
+
+<!-- ── Agent task panel ───────────────────────────────────────────── -->
+<div id="agent-panel">
+  <div id="agent-panel-hdr">
+    <div id="agent-spinner"></div>
+    <span id="agent-panel-title">🤖 Planning…</span>
+  </div>
+  <div id="agent-tasks"></div>
+</div>
+
+<!-- ── Input ────────────────────────────────────────────────────── -->
+<div id="input-area">
+  <!-- Context chips -->
+  <div id="context-bar"></div>
+  <div id="input-row">
+    <textarea id="msg-input" rows="1" placeholder="Ask about your code…"></textarea>
+    <button id="attach-btn" title="Attach context: current file / selection / browse files or folder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+      </svg>
+    </button>
+    <button id="send-btn" title="Send (Enter)">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script nonce="{{NONCE}}">
+(function () {
+  'use strict';
+
+  console.log('[LocalAI] Script loaded, window=' + typeof window + ', document.readyState=' + document.readyState);
+
+  const vscode       = acquireVsCodeApi();
+  const msgsEl       = document.getElementById('messages');
+  const welcomeEl    = document.getElementById('welcome');
+  const typingEl     = document.getElementById('typing');
+  const inputEl      = document.getElementById('msg-input');
+  const sendBtn      = document.getElementById('send-btn');
+  const clearBtn     = document.getElementById('clear-btn');
+  const connDot      = document.getElementById('conn-dot');
+  const connBanner   = document.getElementById('conn-banner');
+  const errToast     = document.getElementById('error-toast');
+  const modelBtn     = document.getElementById('model-btn');
+  const modelMenu    = document.getElementById('model-menu');
+  const modelNameEl  = document.getElementById('model-name');
+  const mdlInstalled = document.getElementById('mdl-installed');
+  const mdlAvailable = document.getElementById('mdl-available');
+  const actionSelect = document.getElementById('action-select');
+  const attachBtn    = document.getElementById('attach-btn');
+  const contextBar   = document.getElementById('context-bar');
+  const agentPanel   = document.getElementById('agent-panel');
+  const agentSpinner = document.getElementById('agent-spinner');
+  const agentTitle   = document.getElementById('agent-panel-title');
+  const agentTasks   = document.getElementById('agent-tasks');
+  const historySidebar = document.getElementById('history-sidebar');
+  const historyList    = document.getElementById('history-list');
+  const historyBtn     = document.getElementById('history-btn');
+  const historyCloseBtn = document.getElementById('history-close-btn');
+  const historyNewBtn  = document.getElementById('history-new-btn');
+
+  // Popular models to show when not installed
+const POPULAR_MODELS = [
+  // Small & fast (good for local/low-resource)
+  "gemma:2b",
+  "gemma2:2b",
+  "phi3:mini",
+  "llama3.2:1b",
+  "llama3.2:3b",
+  "qwen2.5:3b",
+
+  // Balanced (best quality/speed ratio)
+  "mistral:7b",
+  "llama3.1:8b",
+  "qwen2.5:7b",
+  "phi3:medium",
+  "gemma2:9b",
+
+  // Coding / Technical
+  "codellama:7b",
+  "deepseek-coder:6.7b",
+  "qwen2.5-coder:7b",
+  "deepseek-coder-v2:16b",   // if you have decent VRAM
+  "codegemma:7b",
+
+  // Reasoning / Large (for stronger hardware)
+  "llama3.1:70b",
+  "qwen2.5:32b",
+  "mistral-large",
+  "command-r:35b"
+];
+
+  var currentModel = 'gemma:2b';
+  var pullingModel = null; // model currently being pulled
+  var pendingAction = null; // 'fix' | 'refactor' | 'generate' | null
+  var plannedTasks = null;  // tasks from dry-run Plan mode, waiting for user to Run
+  var installedModels = [];
+  var contextItems   = []; // [{ name, lang, content, isAuto }]
+  var autoContextName  = null; // tracks the auto-attached file name
+  var autoSelectionKey = '__selection__'; // fixed key for auto selection chip
+
+  let streaming         = false;
+  let currentBubble     = null;   // DOM element for the active assistant bubble
+  let currentRawText    = '';     // raw accumulated text during streaming
+
+  // ── Suggestion chips ───────────────────────────────────────────
+  document.querySelectorAll('.chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      var prompt = chip.getAttribute('data-prompt');
+      if (prompt) { dispatchSend(prompt); }
+    });
+  });
+
+  // ── Auto-resize textarea ───────────────────────────────────────
+  inputEl.addEventListener('input', resizeInput);
+  function resizeInput() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, Math.floor(window.innerHeight / 3)) + 'px';
+  }
+
+  // ── Send on Enter (Shift+Enter = newline) ──────────────────────
+  inputEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      triggerSend();
+    }
+  });
+  sendBtn.addEventListener('click', triggerSend);
+  clearBtn.addEventListener('click', clearChat);
+
+  // ── History sidebar ────────────────────────────────────────────
+  historyBtn.addEventListener('click', function() {
+    historySidebar.classList.toggle('show');
+  });
+  historyCloseBtn.addEventListener('click', function() {
+    historySidebar.classList.remove('show');
+  });
+  historyNewBtn.addEventListener('click', function() {
+    vscode.postMessage({ type: 'newConversation' });
+    resetLocalUI();
+    historySidebar.classList.remove('show');
+  });
+
+  function renderHistoryList(conversations, activeId) {
+    historyList.innerHTML = '';
+    if (!conversations || conversations.length === 0) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'padding:12px 10px;font-size:11px;color:var(--fg2);text-align:center';
+      empty.textContent = 'No history yet';
+      historyList.appendChild(empty);
+      return;
+    }
+    conversations.forEach(function(conv) {
+      var item = document.createElement('div');
+      item.className = 'hist-item' + (conv.id === activeId ? ' active' : '');
+
+      var body = document.createElement('div');
+      body.className = 'hist-item-body';
+
+      var title = document.createElement('div');
+      title.className = 'hist-item-title';
+      title.textContent = conv.title || 'New chat';
+
+      var date = document.createElement('div');
+      date.className = 'hist-item-date';
+      var d = new Date(conv.createdAt);
+      date.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      body.appendChild(title);
+      body.appendChild(date);
+
+      var del = document.createElement('button');
+      del.className = 'hist-item-del';
+      del.innerHTML = '&times;';
+      del.title = 'Delete';
+      del.addEventListener('click', function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'deleteConversation', id: conv.id });
+      });
+
+      item.appendChild(body);
+      item.appendChild(del);
+
+      item.addEventListener('click', function() {
+        if (conv.id === activeId) { historySidebar.classList.remove('show'); return; }
+        vscode.postMessage({ type: 'switchConversation', id: conv.id });
+        historySidebar.classList.remove('show');
+      });
+
+      historyList.appendChild(item);
+    });
+  }
+  attachBtn.addEventListener('click', function() {
+    vscode.postMessage({ type: 'attachFile' });
+  });
+
+  // ── Action select placeholder update ──────────────────────────
+  actionSelect.addEventListener('change', function() {
+    updatePlaceholder();
+  });
+
+  function updatePlaceholder() {
+    var action = actionSelect.value;
+    if (action === 'plan') {
+      inputEl.placeholder = 'Describe what you want to build… (AI will create a plan for you to review)';
+    } else if (action === 'agent') {
+      inputEl.placeholder = 'Describe the feature or project to build — Agent will plan & create all files automatically…';
+    } else {
+      inputEl.placeholder = 'Ask anything about your code…';
+    }
+  }
+
+  // ── Model dropdown logic ───────────────────────────────────────
+  modelBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    modelMenu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', function() {
+    modelMenu.classList.add('hidden');
+  });
+  modelMenu.addEventListener('click', function(e) { e.stopPropagation(); });
+
+  function buildModelMenu(installed, active) {
+    // Clear old items (keep section label)
+    Array.from(mdlInstalled.querySelectorAll('.mdl-item')).forEach(function(el) { el.remove(); });
+    Array.from(mdlAvailable.querySelectorAll('.mdl-item')).forEach(function(el) { el.remove(); });
+
+    installedModels = installed || [];
+    var installedSet = {};
+    installedModels.forEach(function(m) { installedSet[m] = true; });
+
+    if (installedModels.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'mdl-item not-installed';
+      empty.style.fontStyle = 'italic';
+      empty.textContent = 'No models found';
+      mdlInstalled.appendChild(empty);
+    } else {
+      installedModels.forEach(function(m) {
+        var item = makeMdlItem(m, true, m === active);
+        mdlInstalled.appendChild(item);
+      });
+    }
+
+    POPULAR_MODELS.forEach(function(m) {
+      if (!installedSet[m]) {
+        var item = makeMdlItem(m, false, false);
+        mdlAvailable.appendChild(item);
+      }
+    });
+  }
+
+  function makeMdlItem(modelId, isInstalled, isActive) {
+    var item = document.createElement('div');
+    item.className = 'mdl-item' + (isActive ? ' active' : '') + (!isInstalled ? ' not-installed' : '');
+
+    var dot = document.createElement('span');
+    dot.className = 'mdl-dot ' + (isInstalled ? 'ok' : 'na');
+    item.appendChild(dot);
+
+    var name = document.createElement('span');
+    name.textContent = modelId;
+    item.appendChild(name);
+
+    if (!isInstalled) {
+      var hint = document.createElement('span');
+      hint.className = 'mdl-pull';
+      if (pullingModel === modelId) {
+        hint.textContent = 'pulling…';
+        item.classList.add('pulling');
+        // add progress bar
+        var pWrap = document.createElement('div');
+        pWrap.className = 'mdl-progress-wrap';
+        var pBar = document.createElement('div');
+        pBar.className = 'mdl-progress-bar';
+        pBar.id = 'pull-bar-' + modelId.replace(/[^a-z0-9]/gi, '_');
+        pWrap.appendChild(pBar);
+        item.appendChild(hint);
+        item.appendChild(pWrap);
+      } else {
+        hint.textContent = 'ollama pull';
+        item.appendChild(hint);
+      }
+    }
+
+    item.addEventListener('click', function() {
+      if (isInstalled) {
+        selectModel(modelId);
+      } else {
+        vscode.postMessage({ type: 'pullModel', model: modelId });
+      }
+      modelMenu.classList.add('hidden');
+    });
+    return item;
+  }
+
+  function selectModel(modelId) {
+    currentModel = modelId;
+    modelNameEl.textContent = modelId;
+    buildModelMenu(installedModels, modelId);
+    vscode.postMessage({ type: 'updateModel', model: modelId });
+  }
+
+  function setControlsDisabled(disabled) {
+    sendBtn.disabled    = disabled;
+    attachBtn.disabled  = disabled;
+    actionSelect.disabled = disabled;
+    modelBtn.disabled   = disabled;
+  }
+
+  function triggerSend() {
+    if (streaming) { return; }
+    var action = actionSelect.value;
+
+    if (action === 'agent') {
+      var task = inputEl.value.trim();
+      if (!task) { showError('Describe what you want the agent to build.'); return; }
+      inputEl.value = '';
+      resizeInput();
+      setControlsDisabled(true);
+      hideWelcome();
+      addUserBubble(task);
+      vscode.postMessage({ type: 'agentStart', task: task, dryRun: false, context: buildContextBlock() });
+      return;
+    }
+
+    if (action === 'plan') {
+      var task = inputEl.value.trim();
+      if (!task) { showError('Describe what you want to plan.'); return; }
+      inputEl.value = '';
+      resizeInput();
+      setControlsDisabled(true);
+      hideWelcome();
+      addUserBubble(task);
+      vscode.postMessage({ type: 'agentStart', task: task, dryRun: true, context: buildContextBlock() });
+      return;
+    }
+
+    // ask / chat
+    var text = inputEl.value.trim();
+    if (!text) { return; }
+    dispatchSend(text);
+  }
+
+  function dispatchSend(text) {
+    hideWelcome();
+    addUserBubble(text);
+    inputEl.value = '';
+    resizeInput();
+    streaming = true;
+    setControlsDisabled(true);
+    // Send clean text separately from context so history stays clean
+    vscode.postMessage({ type: 'sendMessage', text: text, context: buildContextBlock() });
+  }
+
+  function clearChat() {
+    resetLocalUI();
+    vscode.postMessage({ type: 'clearChat' });
+  }
+
+  function resetLocalUI() {
+    msgsEl.querySelectorAll('.msg').forEach(function(m) { m.remove(); });
+    welcomeEl.style.display = '';
+    currentBubble  = null;
+    currentRawText = '';
+    streaming = false;
+    setControlsDisabled(false);
+    inputEl.value = '';
+    resizeInput();
+    // Clear context bar (keep non-auto items? No — full reset)
+    contextItems = [];
+    autoContextName = null;
+    renderContextBar();
+    agentPanel.classList.remove('show');
+    typingEl.classList.remove('show');
+  }
+
+  function hideWelcome() {
+    welcomeEl.style.display = 'none';
+  }
+
+  // ── Message rendering ──────────────────────────────────────────
+  function addUserBubble(text) {
+    var msg    = document.createElement('div');
+    msg.className = 'msg user';
+    var label  = document.createElement('div');
+    label.className = 'msg-label';
+    label.textContent = 'You';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    msg.appendChild(label);
+    msg.appendChild(bubble);
+    msgsEl.insertBefore(msg, typingEl);
+    scrollDown();
+  }
+
+  function startAssistantBubble() {
+    typingEl.classList.add('show');
+    scrollDown();
+  }
+
+  function appendToken(token) {
+    if (!currentBubble) {
+      typingEl.classList.remove('show');
+      var msg    = document.createElement('div');
+      msg.className = 'msg assistant';
+      var label  = document.createElement('div');
+      label.className = 'msg-label';
+      label.textContent = 'Local AI';
+      var bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      msg.appendChild(label);
+      msg.appendChild(bubble);
+      msgsEl.insertBefore(msg, typingEl);
+      currentBubble  = bubble;
+      currentRawText = '';
+    }
+    currentRawText += token;
+    // Light render during streaming (plain text, preserve whitespace)
+    currentBubble.textContent = currentRawText;
+    scrollDown();
+  }
+
+  function finalizeAssistant() {
+    var rawText = currentRawText;
+    var bubble  = currentBubble;
+    if (bubble) {
+      bubble.innerHTML = renderMarkdown(rawText);
+      currentBubble  = null;
+      currentRawText = '';
+    }
+    typingEl.classList.remove('show');
+    streaming = false;
+    setControlsDisabled(false);
+    inputEl.focus();
+    scrollDown();
+    // Add apply/create buttons for actionable responses
+    if (pendingAction && bubble) {
+      if (pendingAction === 'generate') {
+        var code = extractFirstCodeBlock(rawText);
+        var lang = extractLangFromCodeFence(rawText);
+        if (code) {
+          vscode.postMessage({ type: 'createFile', code: code, lang: lang });
+        } else {
+          // No code fence found — show a manual apply button
+          addApplyButtons(bubble.closest('.msg'), 'generate-noblock', rawText);
+        }
+      } else {
+        addApplyButtons(bubble.closest('.msg'), pendingAction, rawText);
+      }
+    }
+    pendingAction = null;
+  }
+
+  function scrollDown() {
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  function showError(msg) {
+    errToast.style.display = 'block';
+    errToast.textContent = '✕  ' + msg;
+    typingEl.classList.remove('show');
+    streaming = false;
+    setControlsDisabled(false);
+    currentBubble  = null;
+    currentRawText = '';
+    pendingAction  = null;
+    setTimeout(function() { errToast.style.display = 'none'; }, 6000);
+  }
+
+  // ── Apply / Create file buttons ───────────────────────────────
+  function extractFirstCodeBlock(rawText) {
+    // Try standard fenced block: ```lang\ncode\n```
+    var m = rawText.match(/```[\w+-]*\r?\n([\s\S]*?)\r?\n```/);
+    if (m) { return m[1].trim(); }
+    // Fallback: any ``` pair
+    var m2 = rawText.match(/```[\w+-]*\r?\n([\s\S]*?)```/);
+    if (m2) { return m2[1].trim(); }
+    return null;  // caller must handle null
+  }
+
+  function extractLangFromCodeFence(rawText) {
+    var m = rawText.match(/```([a-zA-Z0-9_+-]+)/);
+    return m ? m[1] : '';
+  }
+
+  function extractFilenameFromResponse(rawText) {
+    // AI is asked to write: // @filename: something.ts
+    var m = rawText.match(/\/\/\s*@filename:\s*(\S+)/);
+    return m ? m[1] : null;
+  }
+
+  function addApplyButtons(msgEl, action, rawText) {
+    if (!msgEl) { return; }
+    var code = extractFirstCodeBlock(rawText) || rawText.trim();
+    if (!code) { return; }
+    var bar = document.createElement('div');
+    bar.className = 'apply-bar';
+
+    if (action === 'generate-noblock') {
+      // AI didn't wrap code in a fence — offer save dialog
+      var btn = document.createElement('button');
+      btn.className = 'apply-btn';
+      btn.textContent = '📄 Save as file…';
+      (function(b, c) {
+        b.addEventListener('click', function() {
+          vscode.postMessage({ type: 'createFile', code: c, lang: '', filename: null });
+          b.textContent = '⏳ Saving…'; b.disabled = true;
+        });
+      })(btn, code);
+      bar.appendChild(btn);
+    } else {
+      var btn = document.createElement('button');
+      btn.className = 'apply-btn';
+      btn.textContent = '✅ Apply to file';
+      (function(b, c) {
+        b.addEventListener('click', function() {
+          vscode.postMessage({ type: 'applyToFile', code: c, action: action });
+          b.textContent = '✓ Applied';
+          b.disabled = true;
+        });
+      })(btn, code);
+      bar.appendChild(btn);
+    }
+    msgEl.appendChild(bar);
+    scrollDown();
+  }
+
+  // ── Markdown renderer ──────────────────────────────────────────
+  function escHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderMarkdown(rawText) {
+    var codeBlocks = [];
+    // 1. Extract fenced code blocks
+    var text = rawText.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+      var idx = codeBlocks.length;
+      codeBlocks.push({ lang: lang || 'code', code: code.trimEnd() });
+      return '\x01BLOCK' + idx + '\x01';
+    });
+
+    // 2. Process line-by-line
+    var lines  = text.split('\n');
+    var result = [];
+    var i      = 0;
+
+    while (i < lines.length) {
+      var raw = lines[i];
+
+      // Code block placeholder
+      var bm = raw.match(/^\x01BLOCK(\d+)\x01$/);
+      if (bm) {
+        var bi   = parseInt(bm[1], 10);
+        var blk  = codeBlocks[bi];
+        result.push(buildCodeBlock(blk.lang, blk.code));
+        i++; continue;
+      }
+
+      // Empty line
+      if (raw.trim() === '') {
+        result.push('<br>');
+        i++; continue;
+      }
+
+      var esc = escHtml(raw);
+
+      // Headings
+      if (/^### /.test(esc)) { result.push('<h3>' + inlineFmt(esc.slice(4))  + '</h3>'); i++; continue; }
+      if (/^## /.test(esc))  { result.push('<h2>' + inlineFmt(esc.slice(3))  + '</h2>'); i++; continue; }
+      if (/^# /.test(esc))   { result.push('<h1>' + inlineFmt(esc.slice(2))  + '</h1>'); i++; continue; }
+
+      // HR
+      if (esc.trim() === '---') { result.push('<hr>'); i++; continue; }
+
+      // Unordered list
+      if (/^[-*] /.test(esc)) {
+        var items = [];
+        while (i < lines.length && /^[-*] /.test(escHtml(lines[i]))) {
+          items.push('<li>' + inlineFmt(escHtml(lines[i]).slice(2)) + '</li>');
+          i++;
+        }
+        result.push('<ul>' + items.join('') + '</ul>');
+        continue;
+      }
+
+      // Ordered list
+      if (/^\d+\. /.test(esc)) {
+        var oitems = [];
+        while (i < lines.length && /^\d+\. /.test(escHtml(lines[i]))) {
+          oitems.push('<li>' + inlineFmt(escHtml(lines[i]).replace(/^\d+\. /, '')) + '</li>');
+          i++;
+        }
+        result.push('<ol>' + oitems.join('') + '</ol>');
+        continue;
+      }
+
+      // Regular paragraph line
+      result.push('<p>' + inlineFmt(esc) + '</p>');
+      i++;
+    }
+
+    return result.join('\n');
+  }
+
+  function inlineFmt(text) {
+    // Bold
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Inline code
+    text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Links
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return text;
+  }
+
+  function buildCodeBlock(lang, code) {
+    var escaped = escHtml(code);
+    return (
+      '<div class="code-block">' +
+        '<div class="code-block-hdr">' +
+          '<span class="code-lang">' + escHtml(lang) + '</span>' +
+          '<button class="copy-btn" onclick="copyCode(this)">Copy</button>' +
+        '</div>' +
+        '<pre><code>' + escaped + '</code></pre>' +
+      '</div>'
+    );
+  }
+
+  // ── Copy code button (global scope needed for onclick) ─────────
+  window.copyCode = function(btn) {
+    var pre  = btn.closest('.code-block').querySelector('pre');
+    var text = pre.textContent || '';
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function() {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(function() {
+      btn.textContent = 'Failed';
+      setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+    });
+  };
+
+  // ── Context (file attach) logic ─────────────────────────────────
+  // Badge colors per language (matching VS Code token colors)
+  var LANG_BADGE = {
+    ts: { label: 'TS', bg: '#1a85c8' },
+    tsx: { label: 'TSX', bg: '#1a85c8' },
+    js: { label: 'JS', bg: '#c8a800' },
+    jsx: { label: 'JSX', bg: '#c8a800' },
+    mjs: { label: 'JS', bg: '#c8a800' },
+    py: { label: 'PY', bg: '#3572a5' },
+    go: { label: 'GO', bg: '#00add8' },
+    rs: { label: 'RS', bg: '#c0392b' },
+    java: { label: 'JV', bg: '#b07219' },
+    kt: { label: 'KT', bg: '#a97bff' },
+    swift: { label: 'SW', bg: '#f05138' },
+    dart: { label: 'DT', bg: '#00b4ab' },
+    cs: { label: 'C#', bg: '#178600' },
+    cpp: { label: 'C++', bg: '#f34b7d' },
+    c: { label: 'C', bg: '#555' },
+    html: { label: 'HTML', bg: '#e44d26' },
+    css: { label: 'CSS', bg: '#563d7c' },
+    scss: { label: 'SCSS', bg: '#c6538c' },
+    json: { label: 'JSON', bg: '#292929' },
+    yaml: { label: 'YAML', bg: '#cb171e' },
+    yml: { label: 'YAML', bg: '#cb171e' },
+    md: { label: 'MD', bg: '#083fa1' },
+    sh: { label: 'SH', bg: '#89e051' },
+    rb: { label: 'RB', bg: '#701516' },
+    php: { label: 'PHP', bg: '#4f5d95' },
+    sql: { label: 'SQL', bg: '#e38c00' },
+  };
+  var BADGE_FOLDER = { label: '\u25a4', bg: '#c8a800' }; // ▤ folder
+  var BADGE_AUTO   = { label: 'AUTO', bg: '#4ec9b0' };
+  var BADGE_FILE   = { label: 'FILE', bg: '#555' };
+
+  function getBadge(lang, isAuto, isFolder) {
+    if (isAuto)   { return BADGE_AUTO; }
+    if (isFolder) { return BADGE_FOLDER; }
+    return LANG_BADGE[lang.toLowerCase()] || BADGE_FILE;
+  }
+
+  function addContextItem(name, lang, content, isAuto, isFolder) {
+    contextItems = contextItems.filter(function(c) { return c.name !== name; });
+    contextItems.push({ name: name, lang: lang || 'text', content: content, isAuto: !!isAuto, isFolder: !!isFolder });
+    renderContextBar();
+  }
+
+  function removeContextItem(name) {
+    contextItems = contextItems.filter(function(c) { return c.name !== name; });
+    renderContextBar();
+  }
+
+  function renderContextBar() {
+    contextBar.innerHTML = '';
+    if (contextItems.length === 0) {
+      contextBar.classList.remove('show');
+      return;
+    }
+    contextBar.classList.add('show');
+    contextItems.forEach(function(item) {
+      // Loading placeholder
+      if (item.loading) {
+        var chip = document.createElement('div');
+        chip.className = 'ctx-chip';
+        var badge = document.createElement('span');
+        badge.className = 'ctx-chip-badge';
+        badge.style.background = '#555';
+        badge.textContent = '...';
+        chip.appendChild(badge);
+        var nm = document.createElement('span');
+        nm.className = 'ctx-chip-name';
+        nm.textContent = 'Reading…';
+        chip.appendChild(nm);
+        contextBar.appendChild(chip);
+        return;
+      }
+
+      // Show only filename (last segment) as display name
+      // Show displayName if set (e.g. selection chips), else last path segment
+      var segments = item.name.replace(/\\/g, '/').split('/');
+      var displayName = item.displayName || segments[segments.length - 1] || item.name;
+
+      var b = getBadge(item.lang, item.isAuto, item.isFolder);
+
+      var chip = document.createElement('div');
+      chip.className = 'ctx-chip' + (item.isAuto ? ' auto' : '') + (item.isFolder ? ' folder' : '');
+      chip.title = item.name;
+
+      var badge = document.createElement('span');
+      badge.className = 'ctx-chip-badge';
+      badge.style.background = b.bg;
+      badge.textContent = b.label;
+      chip.appendChild(badge);
+
+      var nameEl = document.createElement('span');
+      nameEl.className = 'ctx-chip-name';
+      nameEl.textContent = displayName;
+      chip.appendChild(nameEl);
+
+      var rm = document.createElement('button');
+      rm.className = 'ctx-chip-rm';
+      rm.innerHTML = '&times;';
+      rm.title = 'Remove';
+      rm.addEventListener('click', (function(n) {
+        return function() { removeContextItem(n); };
+      })(item.name));
+      chip.appendChild(rm);
+      contextBar.appendChild(chip);
+    });
+  }
+
+  // ── Drag & Drop ───────────────────────────────────────────────────
+  var dropOverlay = document.getElementById('drop-overlay');
+  var inputRow    = document.getElementById('input-row');
+  var dragCounter = 0;
+
+  // Use window-level listeners — document.body may not receive drag events in VS Code webview iframe
+  window.addEventListener('dragenter', function(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    console.log('[DnD] dragenter types:', types ? Array.prototype.slice.call(types) : null);
+    if (!types) { return; }
+    if (Array.prototype.indexOf.call(types, 'Files') !== -1 ||
+        Array.prototype.indexOf.call(types, 'text/uri-list') !== -1) {
+      e.preventDefault();
+      dragCounter++;
+      inputRow.classList.add('drag-over');
+      console.log('[DnD] dragenter accepted, counter=', dragCounter);
+    }
+  });
+
+  window.addEventListener('dragover', function(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    if (!types) { return; }
+    if (Array.prototype.indexOf.call(types, 'Files') !== -1 ||
+        Array.prototype.indexOf.call(types, 'text/uri-list') !== -1) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  });
+
+  window.addEventListener('dragleave', function(e) {
+    dragCounter = Math.max(0, dragCounter - 1);
+    console.log('[DnD] dragleave counter=', dragCounter);
+    if (dragCounter === 0) { inputRow.classList.remove('drag-over'); }
+  });
+
+  window.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dragCounter = 0;
+    inputRow.classList.remove('drag-over');
+    console.log('[DnD] drop fired');
+
+    // ── text/uri-list FIRST: works for both VS Code Explorer and macOS Finder drag.
+    // The extension reads files via VS Code API — more reliable than FileReader in a sandboxed webview.
+    var uriList = e.dataTransfer && e.dataTransfer.getData('text/uri-list');
+    console.log('[DnD] text/uri-list:', uriList);
+    if (uriList && uriList.trim()) {
+      var uris = uriList.trim().split(/\r?\n/).filter(function(l) { return l && !l.startsWith('#'); });
+      console.log('[DnD] parsed URIs:', uris);
+      if (uris.length > 0) {
+        var tmpName = '__loading__';
+        contextItems = contextItems.filter(function(c) { return c.name !== tmpName; });
+        contextItems.push({ name: tmpName, lang: '', content: '', isAuto: false, isFolder: false, loading: true });
+        renderContextBar();
+        vscode.postMessage({ type: 'attachUris', uris: uris });
+        return;
+      }
+    }
+
+    // ── Fallback: webkitGetAsEntry (when text/uri-list is unavailable) ──────────
+    var items = e.dataTransfer && e.dataTransfer.items;
+    console.log('[DnD] dataTransfer.items count:', items ? items.length : 0);
+    var hasEntries = false;
+    if (items && items.length > 0) {
+      for (var i = 0; i < items.length; i++) {
+        var entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+        console.log('[DnD] item[' + i + '] entry:', entry ? (entry.isFile ? 'FILE:' + entry.name : 'DIR:' + entry.name) : 'null');
+        if (!entry) { continue; }
+        hasEntries = true;
+        if (entry.isFile) { readFileEntry(entry, ''); }
+        else if (entry.isDirectory) { readDirEntry(entry); }
+      }
+    }
+    if (hasEntries) { console.log('[DnD] handled via webkitGetAsEntry'); return; }
+
+    // ── Last resort: dataTransfer.files ───────────────────────────────────────────
+    var files = e.dataTransfer && e.dataTransfer.files;
+    console.log('[DnD] dataTransfer.files count:', files ? files.length : 0);
+    if (files && files.length > 0) {
+      for (var j = 0; j < files.length; j++) {
+        (function(file) {
+          console.log('[DnD] reading file via FileReader:', file.name);
+          var name = file.name;
+          var ext = name.includes('.') ? name.split('.').pop() : 'text';
+          var reader = new FileReader();
+          reader.onload = function(ev) {
+            if (typeof ev.target.result === 'string') {
+              addContextItem(name, ext, ev.target.result, false, false);
+            }
+          };
+          reader.readAsText(file);
+        })(files[j]);
+      }
+    } else {
+      console.log('[DnD] no data found in drop event — nothing to attach');
+    }
+  });
+
+  var CODE_EXTS = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|dart|c|cpp|h|hpp|cs|rb|php|html|css|scss|less|json|yaml|yml|toml|md|txt|sh|bash|zsh|env|gitignore|sql|graphql|proto)$/i;
+
+  function readFileEntry(entry, prefix) {
+    entry.file(function(file) {
+      if (prefix && !CODE_EXTS.test(file.name)) { return; }
+      var name = prefix ? prefix + '/' + file.name : file.name;
+      var ext = file.name.includes('.') ? file.name.split('.').pop() : 'text';
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        if (typeof ev.target.result === 'string') {
+          addContextItem(name, ext, ev.target.result, false, false);
+        }
+      };
+      reader.onerror = function() { showError('Could not read: ' + name); };
+      reader.readAsText(file);
+    });
+  }
+
+  // For OS drag of folders: collect all files then emit one folder chip
+  function readDirEntry(dirEntry) {
+    var folderName = dirEntry.name;
+    var allFiles = [];
+    var pending = 0;
+    var scanDone = false;
+
+    function tryFlush() {
+      if (!scanDone || pending > 0) { return; }
+      if (allFiles.length === 0) { return; }
+      var combined = allFiles.map(function(f) {
+        return '// ' + f.name + '\n```' + f.lang + '\n' + f.content + '\n```';
+      }).join('\n\n');
+      addContextItem(folderName, 'folder', combined, false, true);
+    }
+
+    function collectFile(entry, dirPath) {
+      pending++;
+      entry.file(function(file) {
+        if (!CODE_EXTS.test(file.name)) { pending--; tryFlush(); return; }
+        var name = dirPath + '/' + file.name;
+        var ext = file.name.includes('.') ? file.name.split('.').pop() : 'text';
+        var fr = new FileReader();
+        fr.onload = function(ev) {
+          if (typeof ev.target.result === 'string') {
+            allFiles.push({ name: name, lang: ext, content: ev.target.result });
+          }
+          pending--; tryFlush();
+        };
+        fr.onerror = function() { pending--; tryFlush(); };
+        fr.readAsText(file);
+      });
+    }
+
+    function scanDir(entry, parentPath) {
+      var dirPath = parentPath ? parentPath + '/' + entry.name : entry.name;
+      var reader = entry.createReader();
+      var batch = [];
+      pending++;
+      function nextBatch() {
+        reader.readEntries(function(entries) {
+          if (entries.length === 0) {
+            batch.forEach(function(e) {
+              if (e.isFile) { collectFile(e, dirPath); }
+              else if (e.isDirectory && e.name !== 'node_modules' && e.name !== '.git' && e.name !== 'dist' && e.name !== 'out' && e.name !== '__pycache__') {
+                scanDir(e, dirPath);
+              }
+            });
+            pending--; tryFlush();
+            return;
+          }
+          batch = batch.concat(Array.prototype.slice.call(entries));
+          nextBatch();
+        }, function() { pending--; tryFlush(); });
+      }
+      nextBatch();
+    }
+
+    scanDir(dirEntry, '');
+    scanDone = true;
+    tryFlush();
+  }
+
+  var MAX_CONTEXT_CHARS = 10000;
+
+  function buildPromptWithContext(userText) {
+    if (contextItems.length === 0) { return userText; }
+    var parts = [userText, ''];
+    contextItems.forEach(function(item) {
+      var content = item.content;
+      var truncNote = '';
+      if (content.length > MAX_CONTEXT_CHARS) {
+        content = content.slice(0, MAX_CONTEXT_CHARS);
+        truncNote = '\n... [truncated — ' + item.name + ' is too long]';
+      }
+      parts.push('--- Context: ' + item.name + ' ---');
+      parts.push('```' + item.lang + '\n' + content + truncNote + '\n```');
+    });
+    return parts.join('\n');
+  }
+
+  // Build just the context block (no user text) — used for agent/plan
+  function buildContextBlock() {
+    if (contextItems.length === 0) { return ''; }
+    var parts = [];
+    contextItems.forEach(function(item) {
+      var content = item.content;
+      if (content.length > MAX_CONTEXT_CHARS) {
+        content = content.slice(0, MAX_CONTEXT_CHARS);
+      }
+      parts.push('--- ' + item.name + ' ---');
+      parts.push('```' + item.lang + '\n' + content + '\n```');
+    });
+    return parts.join('\n');
+  }
+
+  // ── Connection status ──────────────────────────────────────────
+  function setConnStatus(connected, models, active) {
+    if (connected) {
+      connDot.className = 'ok';
+      connBanner.classList.remove('show');
+    } else {
+      connDot.className = 'fail';
+      connBanner.classList.add('show');
+    }
+    buildModelMenu(models || [], active || currentModel);
+    if (active) {
+      currentModel = active;
+      modelNameEl.textContent = active;
+    }
+  }
+
+  // ── Messages from extension host ──────────────────────────────
+  window.addEventListener('message', function(event) {
+    var msg = event.data;
+    switch (msg.type) {
+      case 'startAssistantMessage': startAssistantBubble(); break;
+      case 'streamToken':          appendToken(msg.token); break;
+      case 'endAssistantMessage':  finalizeAssistant(); break;
+      case 'error':                showError(msg.message); break;
+      case 'fileContext':
+        addContextItem(msg.name, msg.lang, msg.content, false, false);
+        break;
+      case 'autoContext':
+        // Replace previous auto-context if user hasn't removed it
+        if (msg.clear) {
+          if (autoContextName && contextItems.find(function(c) { return c.name === autoContextName; })) {
+            contextItems = contextItems.filter(function(c) { return c.name !== autoContextName; });
+            autoContextName = null;
+            renderContextBar();
+          }
+          break;
+        }
+        if (autoContextName && contextItems.find(function(c) { return c.name === autoContextName; })) {
+          contextItems = contextItems.filter(function(c) { return c.name !== autoContextName; });
+        }
+        autoContextName = msg.name;
+        addContextItem(msg.name, msg.lang, msg.content, true, false);
+        break;
+      case 'selectionContext':
+        // Always replace the selection chip (only one at a time)
+        contextItems = contextItems.filter(function(c) { return c.name !== autoSelectionKey; });
+        if (!msg.clear && msg.content) {
+          contextItems.push({
+            name: autoSelectionKey,
+            lang: msg.lang || 'text',
+            content: msg.content,
+            isAuto: true,
+            isFolder: false,
+            displayName: msg.name  // e.g. "selection (file.ts)"
+          });
+          renderContextBar();
+        } else {
+          renderContextBar();
+        }
+        break;
+      case 'connectionStatus':     setConnStatus(msg.connected, msg.models, msg.activeModel); break;
+      case 'pullStart':
+        pullingModel = msg.model;
+        buildModelMenu(installedModels, currentModel);
+        break;
+      case 'pullProgress': {
+        var barId = 'pull-bar-' + msg.model.replace(/[^a-z0-9]/gi, '_');
+        var bar = document.getElementById(barId);
+        if (bar && msg.total > 0) {
+          bar.style.width = Math.round((msg.completed / msg.total) * 100) + '%';
+        }
+        break;
+      }
+      case 'pullDone':
+        pullingModel = null;
+        // connectionStatus will follow and rebuild the list
+        break;
+      case 'pullError':
+        pullingModel = null;
+        buildModelMenu(installedModels, currentModel);
+        showError('Pull failed: ' + msg.message);
+        break;
+      case 'createFileError':
+        showError('Could not create file: ' + msg.message);
+        break;
+      case 'attachedFiles': {
+        // Remove loading placeholder
+        contextItems = contextItems.filter(function(c) { return !c.loading; });
+        // Group files by top-level folder prefix
+        var folderMap = {};
+        var looseFiles = [];
+        msg.files.forEach(function(f) {
+          var slash = f.name.indexOf('/');
+          if (slash !== -1) {
+            var folder = f.name.slice(0, slash);
+            if (!folderMap[folder]) { folderMap[folder] = []; }
+            folderMap[folder].push(f);
+          } else {
+            looseFiles.push(f);
+          }
+        });
+        // Add a single folder chip whose content is all files concatenated
+        Object.keys(folderMap).forEach(function(folder) {
+          var files = folderMap[folder];
+          var combined = files.map(function(f) {
+            return '// ' + f.name + '\n```' + f.lang + '\n' + f.content + '\n```';
+          }).join('\n\n');
+          addContextItem(folder, 'folder', combined, false, true);
+        });
+        looseFiles.forEach(function(f) {
+          addContextItem(f.name, f.lang, f.content, false, false);
+        });
+        break;
+      }
+      case 'attachError':
+        contextItems = contextItems.filter(function(c) { return !c.loading; });
+        renderContextBar();
+        showError(msg.message);
+        break;
+      case 'agentFallbackToChat':
+        // AI decided no files needed — hide agent panel, let chat response come through normally
+        agentPanel.classList.remove('show');
+        agentSpinner.classList.remove('show');
+        break;
+      case 'agentPlanning':
+        agentPanel.classList.add('show');
+        agentSpinner.classList.add('show');
+        agentTitle.textContent = '🤖 Planning…';
+        agentTasks.innerHTML = '';
+        break;
+      case 'agentPlan':
+        agentTitle.textContent = (msg.dryRun ? '📝 Plan' : '🤖 Agent') + ' — ' + msg.tasks.length + ' file' + (msg.tasks.length !== 1 ? 's' : '');
+        msg.tasks.forEach(function(t, i) {
+          var row = document.createElement('div');
+          row.className = 'agent-task';
+          row.id = 'agent-task-' + i;
+          var icon = document.createElement('span');
+          icon.className = 'agent-task-icon';
+          icon.textContent = t.type === 'create' ? '📄' : '✏️';
+          var info = document.createElement('div');
+          info.className = 'agent-task-info';
+          var file = document.createElement('div');
+          file.className = 'agent-task-file';
+          file.textContent = t.filename;
+          var desc = document.createElement('div');
+          desc.className = 'agent-task-desc';
+          desc.textContent = t.description;
+          info.appendChild(file);
+          info.appendChild(desc);
+          if (t.reason) {
+            var reason = document.createElement('div');
+            reason.className = 'agent-task-reason';
+            reason.textContent = '→ ' + t.reason;
+            info.appendChild(reason);
+          }
+          row.appendChild(icon);
+          row.appendChild(info);
+          agentTasks.appendChild(row);
+        });
+        plannedTasks = msg.tasks; // always save for Run button
+        break;
+      case 'agentDryRunReady': {
+        agentSpinner.classList.remove('show');
+        var isPlanOnly = !msg.isAgent;
+        agentTitle.textContent = (isPlanOnly ? '📝 Plan' : '🤖 Agent') + ' ready — ' + msg.count + ' file' + (msg.count !== 1 ? 's' : '');
+        // Add Run button (only for agent) or confirm button
+        var runBar = document.createElement('div');
+        runBar.style.cssText = 'padding:6px 10px;border-top:1px solid var(--border);display:flex;gap:6px;';
+        if (!isPlanOnly) {
+          var runBtn = document.createElement('button');
+          runBtn.className = 'apply-btn';
+          runBtn.style.cssText = 'flex:1';
+          runBtn.textContent = '▶ Create all files';
+          runBtn.addEventListener('click', function() {
+            if (!plannedTasks) { return; }
+            runBtn.disabled = true;
+            if (cancelBtn) { cancelBtn.disabled = true; }
+            runBtn.textContent = '⏳ Creating…';
+            agentSpinner.classList.add('show');
+            agentTitle.textContent = '🤖 Agent running…';
+            vscode.postMessage({ type: 'agentRun', tasks: plannedTasks });
+          });
+          var cancelBtn = document.createElement('button');
+          cancelBtn.className = 'apply-btn';
+          cancelBtn.style.cssText = 'border-color:var(--err);color:var(--err)';
+          cancelBtn.textContent = '✕ Cancel';
+          cancelBtn.addEventListener('click', function() {
+            agentPanel.classList.remove('show');
+            plannedTasks = null;
+            setControlsDisabled(false);
+            inputEl.focus();
+          });
+          runBar.appendChild(runBtn);
+          runBar.appendChild(cancelBtn);
+        } else {
+          var runBtn = document.createElement('button');
+          runBtn.className = 'apply-btn';
+          runBtn.style.cssText = 'flex:1';
+          runBtn.textContent = '▶ Run — create all files';
+          runBtn.addEventListener('click', function() {
+            if (!plannedTasks) { return; }
+            runBtn.disabled = true;
+            runBtn.textContent = '⏳ Running…';
+            agentSpinner.classList.add('show');
+            agentTitle.textContent = '🤖 Agent running…';
+            vscode.postMessage({ type: 'agentRun', tasks: plannedTasks });
+          });
+          runBar.appendChild(runBtn);
+        }
+        agentTasks.appendChild(runBar);
+        setControlsDisabled(false);
+        inputEl.focus();
+        break;
+      }
+      case 'agentTaskStart': {
+        var row = document.getElementById('agent-task-' + msg.index);
+        if (row) {
+          row.classList.add('running');
+          row.querySelector('.agent-task-icon').textContent = '⏳';
+        }
+        break;
+      }
+      case 'agentTaskDone': {
+        var row = document.getElementById('agent-task-' + msg.index);
+        if (row) {
+          row.classList.remove('running');
+          row.classList.add('done');
+          row.querySelector('.agent-task-icon').textContent = '✅';
+        }
+        break;
+      }
+      case 'agentTaskError': {
+        var row = document.getElementById('agent-task-' + msg.index);
+        if (row) {
+          row.classList.remove('running');
+          row.classList.add('error');
+          row.querySelector('.agent-task-icon').textContent = '❌';
+          var desc = row.querySelector('.agent-task-desc');
+          if (desc) { desc.textContent = msg.message; }
+        }
+        break;
+      }
+      case 'agentDone':
+        agentSpinner.classList.remove('show');
+        agentTitle.textContent = '✅ Done — ' + msg.count + ' file' + (msg.count !== 1 ? 's' : '') + ' created';
+        setControlsDisabled(false);
+        inputEl.focus();
+        break;
+      case 'agentError':
+        agentSpinner.classList.remove('show');
+        agentTitle.textContent = '❌ Agent failed';
+        setControlsDisabled(false);
+        showError(msg.message);
+        break;
+      case 'modelUpdate':
+        currentModel = msg.model || currentModel;
+        modelNameEl.textContent = currentModel;
+        buildModelMenu(installedModels, currentModel);
+        break;
+      case 'restoreHistory': {
+        resetLocalUI();
+        if (!msg.messages || msg.messages.length === 0) { break; }
+        hideWelcome();
+        msg.messages.forEach(function(m) {
+          if (m.role === 'user') {
+            addUserBubble(m.content);
+          } else if (m.role === 'assistant') {
+            var msgEl = document.createElement('div');
+            msgEl.className = 'msg assistant';
+            var label = document.createElement('div');
+            label.className = 'msg-label';
+            label.textContent = 'Local AI';
+            var bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.innerHTML = renderMarkdown(m.content);
+            msgEl.appendChild(label);
+            msgEl.appendChild(bubble);
+            msgsEl.insertBefore(msgEl, typingEl);
+          }
+        });
+        scrollDown();
+        break;
+      }
+      case 'conversationList':
+        renderHistoryList(msg.conversations, msg.activeId);
+        break;
+      case 'autoSend':
+        hideWelcome();
+        dispatchSend(msg.text);
+        break;
+      case 'setInput':
+        inputEl.value = msg.text || '';
+        resizeInput();
+        inputEl.focus();
+        inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+        break;
+    }
+  });
+
+  // ── Init ───────────────────────────────────────────────────────
+  updatePlaceholder();
+  vscode.postMessage({ type: 'ready' });
+  inputEl.focus();
+})();
+</script>
+</body>
+</html>

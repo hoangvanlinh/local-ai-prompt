@@ -1,0 +1,109 @@
+{
+  "name": "local-ai-prompt",
+  "displayName": "Local AI Prompt",
+  "description": "GitHub Copilot-like AI chat powered by local Ollama LLM — fully offline",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Other"],
+  "keywords": ["ai", "ollama", "prompt", "chat", "llm", "local"],
+  "icon": "media/icon.png",
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "localAI.chat",
+        "title": "Local AI: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "localAI.addToContext",
+        "title": "Add to AI Chat Context"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "localAI.chat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "localAI.chat",
+          "when": "view == localAIPrompt.chatView",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "localAI.addToContext",
+          "group": "navigation@99"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localAIPrompt",
+          "title": "Local AI Prompt",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "localAIPrompt": [
+        {
+          "type": "tree",
+          "id": "localAIPrompt.dropZone",
+          "name": "Drop Files Here",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "localAIPrompt.chatView",
+          "name": "Chat",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Local AI Prompt",
+      "properties": {
+        "localAIPrompt.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama API base URL"
+        },
+        "localAIPrompt.model": {
+          "type": "string",
+          "default": "gemma:2b",
+          "description": "Ollama model to use (e.g. gemma3:2b, llama3.2, codellama, deepseek-r1:7b)"
+        },
+        "localAIPrompt.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful coding assistant. Provide clear, concise, and accurate responses. Format code with proper markdown code blocks with language labels.",
+          "description": "System prompt sent to the AI model"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.3",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0"
+  }
+}
