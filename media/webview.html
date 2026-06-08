@@ -1552,6 +1552,7 @@ const POPULAR_MODELS = [
 
   // Use window-level listeners — document.body may not receive drag events in VS Code webview iframe
   window.addEventListener('dragenter', function(e) {
+     console.log('dragenter');
     var types = e.dataTransfer && e.dataTransfer.types;
     console.log('[DnD] dragenter types:', types ? Array.prototype.slice.call(types) : null);
     if (!types) { return; }
